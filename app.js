@@ -433,6 +433,29 @@ async function avanzarPedido(id) {
   const flujo = ['pendiente', 'en_proceso', 'listo', 'entregado'];
   const idx = flujo.indexOf(p.estado);
   const nuevo = flujo[idx + 1] || p.estado;
+
+  // Si pasa a entregado, descontar inventario por receta y registrar venta
+  if (nuevo === 'entregado') {
+    const prod = await db.productos.get(p.productoId);
+    if (prod && prod.usaReceta) {
+      const recetas = await db.recetas.where('productoId').equals(p.productoId).toArray();
+      for (const r of recetas) {
+        const ins = await db.insumos.get(r.insumoId);
+        if (ins) {
+          const descuento = r.cantidad * p.cantidad;
+          await db.insumos.update(r.insumoId, { cantidad: Math.max(0, ins.cantidad - descuento) });
+          await db.movimientos.add({ fecha: hoy(), insumoId: r.insumoId, tipo: 'venta_pedido', cantidad: descuento, descripcion: `Pedido de ${p.cantidad}x ${prod.nombre} (${p.cliente})` });
+        }
+      }
+    }
+    // Registrar la venta
+    const now = new Date();
+    const fecha = hoy();
+    const hora = now.toTimeString().slice(0,5);
+    const ventaId = await db.ventas.add({ fecha, hora, total: p.precio });
+    await db.ventaItems.add({ ventaId, productoId: p.productoId, cantidad: p.cantidad, subtotal: p.precio });
+  }
+
   await db.pedidos.update(id, { estado: nuevo });
   renderPedidos();
   renderDashboard();
