@@ -1,0 +1,355 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>Gastronomía Manager</title>
+<link rel="manifest" href="manifest.json">
+<meta name="theme-color" content="#0f766e">
+<script src="https://cdn.tailwindcss.com"></script>
+<script src="https://unpkg.com/dexie@3.2.4/dist/dexie.min.js"></script>
+<style>
+  body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; touch-action: manipulation; }
+  .page { display:none; }
+  .page.active { display:block; }
+  .bottom-nav { position:fixed; bottom:0; left:0; right:0; background:#fff; border-top:1px solid #e5e7eb; z-index:50; }
+  .nav-btn { flex:1; padding:8px 0; text-align:center; font-size:11px; color:#6b7280; }
+  .nav-btn.active { color:#0f766e; }
+  .nav-btn svg { width:24px; height:24px; margin:0 auto 2px; }
+  .card { background:#fff; border-radius:12px; padding:16px; margin-bottom:12px; box-shadow:0 1px 3px rgba(0,0,0,0.1); }
+  .fab { position:fixed; bottom:72px; right:16px; width:56px; height:56px; border-radius:50%; background:#0f766e; color:white; display:flex; align-items:center; justify-content:center; box-shadow:0 4px 12px rgba(15,118,110,0.4); z-index:40; }
+  .modal { position:fixed; inset:0; background:rgba(0,0,0,0.5); display:none; align-items:flex-end; justify-content:center; z-index:60; }
+  .modal.active { display:flex; }
+  .modal-content { background:#fff; width:100%; max-height:90vh; border-radius:16px 16px 0 0; overflow-y:auto; padding:20px; }
+  input, select, textarea { width:100%; padding:10px 12px; border:1px solid #d1d5db; border-radius:8px; font-size:16px; margin-top:4px; margin-bottom:12px; -webkit-appearance:none; }
+  label { font-size:13px; color:#6b7280; font-weight:500; }
+  .btn-primary { background:#0f766e; color:white; padding:12px 24px; border-radius:10px; font-weight:600; width:100%; border:none; }
+  .btn-secondary { background:#f3f4f6; color:#374151; padding:12px 24px; border-radius:10px; font-weight:600; width:100%; border:none; }
+  .danger { color:#dc2626; }
+  .success { color:#059669; }
+  .tag { display:inline-block; padding:2px 8px; border-radius:6px; font-size:11px; font-weight:600; }
+  .tag-green { background:#d1fae5; color:#065f46; }
+  .tag-red { background:#fee2e2; color:#991b1b; }
+  .tag-yellow { background:#fef3c7; color:#92400e; }
+  .empty-state { text-align:center; padding:40px 20px; color:#9ca3af; }
+  .search-box { background:#f3f4f6; border-radius:10px; padding:10px 12px; border:none; width:100%; }
+  .list-item { display:flex; align-items:center; justify-content:space-between; padding:12px 16px; border-bottom:1px solid #f3f4f6; }
+  .list-item:last-child { border-bottom:none; }
+  .scrollable { overflow-y:auto; -webkit-overflow-scrolling:touch; }
+  .ingredient-row { display:flex; gap:8px; align-items:flex-end; margin-bottom:8px; }
+  .ingredient-row input { margin-bottom:0; }
+  .remove-ingredient { color:#dc2626; font-size:20px; padding:8px; }
+  .quantity-badge { background:#0f766e; color:white; padding:2px 8px; border-radius:12px; font-size:12px; font-weight:600; }
+  .chart-bar { height:8px; border-radius:4px; background:#e5e7eb; overflow:hidden; margin-top:4px; }
+  .chart-fill { height:100%; background:#0f766e; border-radius:4px; transition:width 0.3s ease; }
+</style>
+</head>
+<body class="bg-gray-50">
+
+<!-- PÁGINAS -->
+
+<!-- Dashboard -->
+<div id="page-dashboard" class="page active pb-24">
+  <div class="bg-teal-700 text-white p-4 pt-6">
+    <h1 class="text-xl font-bold">Resumen Hoy</h1>
+    <p class="text-teal-100 text-sm" id="current-date"></p>
+  </div>
+  <div class="p-4">
+    <div class="grid grid-cols-2 gap-3 mb-4">
+      <div class="card text-center">
+        <div class="text-2xl font-bold text-teal-700" id="dash-ventas">Gs. 0</div>
+        <div class="text-xs text-gray-500">Ventas</div>
+      </div>
+      <div class="card text-center">
+        <div class="text-2xl font-bold text-red-600" id="dash-gastos">Gs. 0</div>
+        <div class="text-xs text-gray-500">Gastos</div>
+      </div>
+    </div>
+    <div class="card mb-4">
+      <div class="flex justify-between items-center mb-2">
+        <span class="text-sm font-semibold text-gray-700">Ganancia Neta</span>
+        <span class="text-lg font-bold" id="dash-ganancia">Gs. 0</span>
+      </div>
+      <div class="chart-bar"><div class="chart-fill" id="dash-bar" style="width:0%"></div></div>
+    </div>
+    <div class="card">
+      <h3 class="font-semibold text-gray-800 mb-3">Productos con Bajo Stock</h3>
+      <div id="dash-lowstock"></div>
+    </div>
+    <div class="card mt-4">
+      <h3 class="font-semibold text-gray-800 mb-3">Ventas Recientes</h3>
+      <div id="dash-recent"></div>
+    </div>
+  </div>
+</div>
+
+<!-- Productos -->
+<div id="page-productos" class="page pb-24">
+  <div class="bg-teal-700 text-white p-4 pt-6 sticky top-0 z-30">
+    <h1 class="text-xl font-bold">Productos</h1>
+    <input type="text" class="search-box mt-2" placeholder="Buscar producto..." id="search-productos" oninput="renderProductos()">
+  </div>
+  <div class="p-4" id="lista-productos"></div>
+  <button class="fab" onclick="openModal('modal-producto')">
+    <svg width="24" height="24" fill="none" stroke="currentColor" stroke-width="3" viewBox="0 0 24 24"><path d="M12 5v14m-7-7h14"/></svg>
+  </button>
+</div>
+
+<!-- Inventario -->
+<div id="page-inventario" class="page pb-24">
+  <div class="bg-teal-700 text-white p-4 pt-6 sticky top-0 z-30">
+    <h1 class="text-xl font-bold">Inventario</h1>
+    <input type="text" class="search-box mt-2" placeholder="Buscar insumo..." id="search-inventario" oninput="renderInventario()">
+  </div>
+  <div class="p-4" id="lista-inventario"></div>
+  <button class="fab" onclick="openModal('modal-insumo')">
+    <svg width="24" height="24" fill="none" stroke="currentColor" stroke-width="3" viewBox="0 0 24 24"><path d="M12 5v14m-7-7h14"/></svg>
+  </button>
+</div>
+
+<!-- Ventas -->
+<div id="page-ventas" class="page pb-24">
+  <div class="bg-teal-700 text-white p-4 pt-6 sticky top-0 z-30">
+    <h1 class="text-xl font-bold">Ventas</h1>
+  </div>
+  <div class="p-4">
+    <div class="card mb-4">
+      <h3 class="font-semibold text-gray-800 mb-3">Registrar Venta</h3>
+      <div id="venta-items"></div>
+      <button class="btn-secondary mb-3" onclick="agregarItemVenta()">+ Agregar Producto</button>
+      <div class="flex justify-between items-center pt-3 border-t">
+        <span class="font-semibold">Total:</span>
+        <span class="text-xl font-bold text-teal-700" id="venta-total">Gs. 0</span>
+      </div>
+      <button class="btn-primary mt-3" onclick="registrarVenta()">Registrar Venta</button>
+    </div>
+    <div class="card">
+      <h3 class="font-semibold text-gray-800 mb-3">Historial de Ventas</h3>
+      <div id="lista-ventas"></div>
+    </div>
+  </div>
+</div>
+
+<!-- Gastos -->
+<div id="page-gastos" class="page pb-24">
+<div class="bg-teal-700 text-white p-4 pt-6 sticky top-0 z-30">
+  <h1 class="text-xl font-bold">Gastos</h1>
+</div>
+<div class="p-4">
+  <div class="card mb-4">
+    <h3 class="font-semibold text-gray-800 mb-3">Registrar Gasto</h3>
+    <label>Descripción</label>
+    <input type="text" id="gasto-desc" placeholder="Ej. Compra de harina">
+    <label>Monto (Gs.)</label>
+    <input type="number" id="gasto-monto" placeholder="0">
+    <label>Categoría</label>
+    <select id="gasto-categoria">
+      <option value="insumos">Insumos / Materia prima</option>
+      <option value="servicios">Servicios (luz, agua, etc.)</option>
+      <option value="personal">Personal</option>
+      <option value="otros">Otros</option>
+    </select>
+    <button class="btn-primary" onclick="registrarGasto()">Registrar Gasto</button>
+  </div>
+  <div class="card">
+    <h3 class="font-semibold text-gray-800 mb-3">Historial de Gastos</h3>
+    <div id="lista-gastos"></div>
+  </div>
+</div>
+<button class="fab" style="display:none"><!-- placeholder --></button>
+</div>
+
+<!-- Pedidos -->
+<div id="page-pedidos" class="page pb-24">
+<div class="bg-teal-700 text-white p-4 pt-6 sticky top-0 z-30">
+  <h1 class="text-xl font-bold">Pedidos</h1>
+  <p class="text-teal-100 text-sm">Tortas por encargo</p>
+</div>
+<div class="p-4" id="lista-pedidos"></div>
+<button class="fab" onclick="openModal('modal-pedido')">
+  <svg width="24" height="24" fill="none" stroke="currentColor" stroke-width="3" viewBox="0 0 24 24"><path d="M12 5v14m-7-7h14"/></svg>
+</button>
+</div>
+
+<!-- Configuración -->
+<div id="page-config" class="page pb-24">
+<div class="bg-teal-700 text-white p-4 pt-6">
+  <h1 class="text-xl font-bold">Configuración</h1>
+</div>
+<div class="p-4">
+  <div class="card mb-4">
+    <h3 class="font-semibold text-gray-800 mb-3">Respaldo de Datos</h3>
+    <p class="text-sm text-gray-500 mb-3">Exporte todos sus datos a un archivo JSON para guardarlos de forma segura.</p>
+    <button class="btn-primary mb-2" onclick="exportarDatos()">📥 Exportar Datos (JSON)</button>
+    <hr class="my-3 border-gray-200">
+    <p class="text-sm text-gray-500 mb-3">Restaure sus datos desde un archivo JSON previamente exportado.</p>
+    <input type="file" id="import-file" accept=".json" onchange="importarDatos(this)" class="mb-2">
+  </div>
+  <div class="card">
+    <h3 class="font-semibold text-gray-800 mb-3 text-red-600">⚠️ Zona Peligrosa</h3>
+    <button class="btn-secondary danger" onclick="limpiarTodo()">🗑️ Borrar TODOS los datos</button>
+  </div>
+</div>
+</div>
+
+<!-- MODALES -->
+
+<!-- Modal Producto -->
+<div class="modal" id="modal-producto">
+  <div class="modal-content">
+    <div class="flex justify-between items-center mb-4">
+      <h2 class="text-lg font-bold">Nuevo Producto</h2>
+      <button onclick="closeModal('modal-producto')" class="text-gray-500 text-2xl">&times;</button>
+    </div>
+    <label>Nombre</label>
+    <input type="text" id="prod-nombre" placeholder="Ej. Torta de Chocolate">
+    <label>Precio de Venta (Gs.)</label>
+    <input type="number" id="prod-precio" placeholder="0">
+    <label>Categoría</label>
+    <select id="prod-categoria">
+      <option value="torta">Torta</option>
+      <option value="bocadito">Bocadito</option>
+      <option value="almuerzo">Almuerzo</option>
+      <option value="cena">Cena</option>
+      <option value="postre">Postre</option>
+      <option value="otro">Otro</option>
+    </select>
+    <label>¿Usa receta? (descuenta inventario automáticamente)</label>
+    <select id="prod-usa-receta" onchange="toggleReceta()">
+      <option value="no">No</option>
+      <option value="si">Sí</option>
+    </select>
+    <div id="receta-section" style="display:none">
+      <label class="font-semibold text-gray-700">Ingredientes / Receta</label>
+      <div id="receta-ingredientes"></div>
+      <button class="btn-secondary mb-3" onclick="agregarIngredienteReceta()">+ Agregar Insumo</button>
+    </div>
+    <button class="btn-primary" onclick="guardarProducto()">Guardar Producto</button>
+  </div>
+</div>
+
+<!-- Modal Insumo -->
+<div class="modal" id="modal-insumo">
+  <div class="modal-content">
+    <div class="flex justify-between items-center mb-4">
+      <h2 class="text-lg font-bold">Nuevo Insumo</h2>
+      <button onclick="closeModal('modal-insumo')" class="text-gray-500 text-2xl">&times;</button>
+    </div>
+    <label>Nombre</label>
+    <input type="text" id="ins-nombre" placeholder="Ej. Harina">
+    <label>Unidad de medida</label>
+    <select id="ins-unidad">
+      <option value="kg">Kilogramos (kg)</option>
+      <option value="g">Gramos (g)</option>
+      <option value="l">Litros (l)</option>
+      <option value="ml">Mililitros (ml)</option>
+      <option value="un">Unidades (u)</option>
+      <option value="doc">Docenas</option>
+      <option value="paq">Paquetes</option>
+    </select>
+    <label>Cantidad actual</label>
+    <input type="number" step="0.01" id="ins-cantidad" placeholder="0">
+    <label>Stock mínimo (alerta cuando baje de esto)</label>
+    <input type="number" step="0.01" id="ins-minimo" placeholder="0">
+    <label>Precio de compra por unidad (Gs.)</label>
+    <input type="number" id="ins-precio" placeholder="0">
+    <button class="btn-primary" onclick="guardarInsumo()">Guardar Insumo</button>
+  </div>
+</div>
+
+<!-- Modal Editar Insumo -->
+<div class="modal" id="modal-insumo-edit">
+  <div class="modal-content">
+    <div class="flex justify-between items-center mb-4">
+      <h2 class="text-lg font-bold">Ajustar Stock</h2>
+      <button onclick="closeModal('modal-insumo-edit')" class="text-gray-500 text-2xl">&times;</button>
+    </div>
+    <input type="hidden" id="ins-edit-id">
+    <p class="text-sm text-gray-600 mb-2" id="ins-edit-nombre"></p>
+    <label>Cantidad actual</label>
+    <input type="number" step="0.01" id="ins-edit-cantidad" placeholder="0">
+    <button class="btn-primary" onclick="actualizarInsumo()">Actualizar Stock</button>
+  </div>
+</div>
+
+<!-- Modal Pedido -->
+<div class="modal" id="modal-pedido">
+  <div class="modal-content">
+    <div class="flex justify-between items-center mb-4">
+      <h2 class="text-lg font-bold">Nuevo Pedido</h2>
+      <button onclick="closeModal('modal-pedido')" class="text-gray-500 text-2xl">&times;</button>
+    </div>
+    <label>Cliente</label>
+    <input type="text" id="ped-cliente" placeholder="Nombre del cliente">
+    <label>Teléfono</label>
+    <input type="tel" id="ped-telefono" placeholder="Ej. 0981 123456">
+    <label>Producto / Torta</label>
+    <select id="ped-producto"></select>
+    <label>Cantidad</label>
+    <input type="number" id="ped-cantidad" value="1" min="1">
+    <label>Precio Total (Gs.)</label>
+    <input type="number" id="ped-precio" placeholder="0">
+    <label>Fecha de Entrega</label>
+    <input type="date" id="ped-fecha-entrega">
+    <label>Detalles / Diseño</label>
+    <textarea id="ped-detalles" rows="3" placeholder="Tamaño, sabor, decoración, etc."></textarea>
+    <label>Seña / Abono (Gs.)</label>
+    <input type="number" id="ped-senia" placeholder="0">
+    <button class="btn-primary" onclick="guardarPedido()">Guardar Pedido</button>
+  </div>
+</div>
+
+<!-- Modal Confirmación -->
+<div class="modal" id="modal-confirm">
+  <div class="modal-content">
+    <div class="flex justify-between items-center mb-4">
+      <h2 class="text-lg font-bold" id="confirm-title">Confirmar</h2>
+      <button onclick="closeModal('modal-confirm')" class="text-gray-500 text-2xl">&times;</button>
+    </div>
+    <p class="text-gray-600 mb-4" id="confirm-msg">¿Está seguro?</p>
+    <div class="flex gap-3">
+      <button class="btn-secondary flex-1" onclick="closeModal('modal-confirm')">Cancelar</button>
+      <button class="btn-primary flex-1 bg-red-600" id="confirm-btn" onclick="confirmAction()">Confirmar</button>
+    </div>
+  </div>
+</div>
+
+<!-- Modal Costo Receta -->
+<div class="modal" id="modal-costo">
+  <div class="modal-content">
+    <div class="flex justify-between items-center mb-4">
+      <h2 class="text-lg font-bold">Costo de Producción</h2>
+      <button onclick="closeModal('modal-costo')" class="text-gray-500 text-2xl">&times;</button>
+    </div>
+    <div id="costo-content"></div>
+  </div>
+</div>
+
+<!-- BOTTOM NAV -->
+<div class="bottom-nav flex">
+  <button class="nav-btn active" onclick="showPage('dashboard')">
+    <svg fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M3 12l2-2m0 0l7-7 7 7M5 10v10a1 1 0 001 1h3m11-11l-2 2m0 0l-7 7-7-7m13 5v-10a1 1 0 00-1-1h-3"/></svg>
+    Inicio
+  </button>
+  <button class="nav-btn" onclick="showPage('productos')">
+    <svg fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M20 7l-8-4-8 4m16 0l-8 4m8-4v10l-8 4m0-10L4 7m8 4v10M4 7v10l8 4"/></svg>
+    Productos
+  </button>
+  <button class="nav-btn" onclick="showPage('inventario')">
+    <svg fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M20 13V6a2 2 0 00-2-2H6a2 2 0 00-2 2v7m16 0v5a2 2 0 01-2 2H6a2 2 0 01-2-2v-5m16 0h-2.586a1 1 0 00-.707.293l-2.414 2.414a1 1 0 01-.707.293h-3.172a1 1 0 01-.707-.293l-2.414-2.414A1 1 0 006.586 13H4"/></svg>
+    Inventario
+  </button>
+  <button class="nav-btn" onclick="showPage('pedidos')">
+    <svg fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2"/></svg>
+    Pedidos
+  </button>
+  <button class="nav-btn" onclick="showPage('config')">
+    <svg fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"/><path d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/></svg>
+    Más
+  </button>
+</div>
+
+<script src="db.js"></script>
+<script src="app.js"></script>
+</body>
+</html>
