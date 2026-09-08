@@ -297,7 +297,8 @@ async function renderInventario() {
         </div>
       </div>
       <div class="flex gap-2 mt-3 pt-3 border-t">
-        <button class="text-xs text-blue-600 font-semibold" onclick="editarInsumo(${i.id})">✏️ Stock</button>
+        <button class="text-xs text-blue-600 font-semibold" onclick="editarInsumo(${i.id})">✏️ Editar</button>
+        <button class="text-xs text-teal-700 font-semibold" onclick="event.stopPropagation(); verHistorialInsumo(${i.id})">📜 Historial</button>
         <button class="text-xs text-red-600 font-semibold" onclick="event.stopPropagation(); eliminarInsumo(${i.id})">🗑️ Eliminar</button>
       </div>
     </div>`;
@@ -328,22 +329,54 @@ async function editarInsumo(id) {
   const i = await db.insumos.get(id);
   if (!i) return;
   document.getElementById('ins-edit-id').value = id;
-  document.getElementById('ins-edit-nombre').textContent = i.nombre + ' (' + i.unidad + ')';
+  document.getElementById('ins-edit-nombre-input').value = i.nombre;
+  document.getElementById('ins-edit-unidad').value = i.unidad;
   document.getElementById('ins-edit-cantidad').value = i.cantidad;
+  document.getElementById('ins-edit-minimo').value = i.minimo;
+  document.getElementById('ins-edit-precio').value = i.precio || 0;
   openModal('modal-insumo-edit');
 }
 
 async function actualizarInsumo() {
   const id = parseInt(document.getElementById('ins-edit-id').value);
+  const nombre = document.getElementById('ins-edit-nombre-input').value.trim();
+  const unidad = document.getElementById('ins-edit-unidad').value;
   const cantidad = parseFloat(document.getElementById('ins-edit-cantidad').value) || 0;
+  const minimo = parseFloat(document.getElementById('ins-edit-minimo').value) || 0;
+  const precio = parseFloat(document.getElementById('ins-edit-precio').value) || 0;
+  if (!nombre) { alert('Ingrese nombre'); return; }
+
   const ins = await db.insumos.get(id);
   const diff = cantidad - ins.cantidad;
-  await db.insumos.update(id, { cantidad });
+  await db.insumos.update(id, { nombre, unidad, cantidad, minimo, precio });
   if (diff !== 0) {
     await db.movimientos.add({ fecha: hoy(), insumoId: id, tipo: diff > 0 ? 'ajuste_pos' : 'ajuste_neg', cantidad: Math.abs(diff), descripcion: 'Ajuste manual de stock' });
   }
   closeModal('modal-insumo-edit');
   renderInventario();
+}
+
+async function verHistorialInsumo(id) {
+  const i = await db.insumos.get(id);
+  if (!i) return;
+  const movs = await db.movimientos.where('insumoId').equals(id).reverse().limit(20).toArray();
+  let html = `<h3 class="font-bold text-gray-800 mb-3">${i.nombre}</h3>`;
+  html += '<p class="text-sm text-gray-500 mb-2">Stock actual: ' + i.cantidad.toFixed(2) + ' ' + i.unidad + '</p>';
+  if (movs.length === 0) {
+    html += '<p class="text-gray-400 text-sm">Sin movimientos registrados</p>';
+  } else {
+    html += '<div style="max-height:300px;overflow-y:auto;">';
+    movs.forEach(m => {
+      const tipoLabel = { venta: '🔴 Venta', venta_pedido: '🔴 Pedido', ajuste_pos: '🟢 Ajuste +', ajuste_neg: '🟡 Ajuste -' }[m.tipo] || m.tipo;
+      html += `<div class="flex justify-between items-center py-2 border-b text-sm">
+        <div><span class="font-medium">${tipoLabel}</span><br><span class="text-xs text-gray-500">${fmtFecha(m.fecha)} · ${m.descripcion}</span></div>
+        <span class="font-bold ${m.tipo.includes('ajuste_pos') ? 'text-green-600' : 'text-red-600'}">${m.cantidad.toFixed(2)} ${i.unidad}</span>
+      </div>`;
+    });
+    html += '</div>';
+  }
+  document.getElementById('costo-content').innerHTML = html;
+  openModal('modal-costo');
 }
 
 async function eliminarInsumo(id) {
@@ -591,7 +624,7 @@ async function renderVentasHistorial() {
   container.innerHTML = await Promise.all(ventas.map(async v => {
     const items = await db.ventaItems.where('ventaId').equals(v.id).toArray();
     const count = items.reduce((s,it) => s + it.cantidad, 0);
-    return `<div class="list-item">
+    return `<div class="list-item" style="cursor:pointer" onclick="verDetalleVenta(${v.id})">
       <div>
         <div class="font-medium text-sm">${fmtDateTime(v.fecha + 'T' + (v.hora || '00:00'))}</div>
         <div class="text-xs text-gray-500">${count} producto(s)</div>
@@ -599,6 +632,25 @@ async function renderVentasHistorial() {
       <div class="font-bold text-teal-700">${fmtGs(v.total)}</div>
     </div>`;
   })).then(arr => arr.join(''));
+}
+
+async function verDetalleVenta(ventaId) {
+  const v = await db.ventas.get(ventaId);
+  if (!v) return;
+  const items = await db.ventaItems.where('ventaId').equals(ventaId).toArray();
+  let html = `<div class="mb-3"><span class="text-sm text-gray-500">Fecha:</span> <span class="font-semibold">${fmtDateTime(v.fecha + 'T' + (v.hora || '00:00'))}</span></div>`;
+  html += `<div class="mb-3"><span class="text-sm text-gray-500">Total:</span> <span class="font-bold text-teal-700 text-xl">${fmtGs(v.total)}</span></div>`;
+  html += '<hr class="my-3 border-gray-200">';
+  html += '<h4 class="font-semibold text-sm mb-2">Productos:</h4>';
+  for (const it of items) {
+    const prod = await db.productos.get(it.productoId);
+    html += `<div class="flex justify-between items-center py-2 border-b text-sm">
+      <span>${prod ? prod.nombre : 'Producto #' + it.productoId} × ${it.cantidad}</span>
+      <span class="font-semibold">${fmtGs(it.subtotal)}</span>
+    </div>`;
+  }
+  document.getElementById('venta-detalle-content').innerHTML = html;
+  openModal('modal-venta-detalle');
 }
 
 // ============ GASTOS ============
